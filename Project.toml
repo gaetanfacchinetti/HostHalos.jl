@@ -1,0 +1,13 @@
+name = "HostHalos"
+uuid = "9758ad2b-40e1-4c0d-bfef-dec73165ab59"
+authors = ["Gaétan Facchinetti"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
