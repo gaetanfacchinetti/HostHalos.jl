@@ -6,12 +6,11 @@ import CosmoTools: Halo, HaloProfile, nfwProfile, αβγProfile, m_halo, ρ_halo
 import QuadGK, JLD2,  Interpolations
 
 export ρ_HI, ρ_H2, ρ_ISM, ρ_baryons, ρ_baryons_spherical, host_halo, m_baryons_spherical
-export m_host_spherical, μ_host_spherical, ρ_host_spherical, age_host
+export m_host_spherical, μ_host_spherical, ρ_host_spherical, σ_baryons, age_host
 export HostModel, BulgeModel
-export circular_velocity, circular_period, number_circular_orbits, velocity_dispersion_spherical, number_circular_orbits
+export circular_velocity, circular_period, number_circular_orbits, velocity_dispersion_spherical
 export circular_velocity_kms, velocity_dispersion_spherical_kms 
 export milky_way_MM17_g1, milky_way_MM17_g0
-export _save_host, _load_host
 
 
 abstract type BulgeModel{T<:Real} end
@@ -33,8 +32,9 @@ mutable struct HostModel{T<:Real}
     ## precomputed tabulated functions
     ρ_host_spherical::Union{Nothing, Function}
     m_host_spherical::Union{Nothing, Function}
-    velocity_dispersion_spherical::Union{Nothing, Function}
+    velocity_dispersion_spherical_kms::Union{Nothing, Function}
     circular_velocity_kms::Union{Nothing, Function}
+    σ_baryons::Union{Nothing, Function}
 end
 
 Base.length(::HostModel) = 1
@@ -49,7 +49,7 @@ function HostModel(name::String, halo::Halo{<:Real}, bulge::BulgeModel{<:Real},
     # by default the tidal radius is set to the virial radius
     (rt == -1) && (rt = rΔ(halo))
 
-    return HostModel(name, halo, bulge, gas_HI, gas_H2, stars, rt, age, nothing, nothing, nothing, nothing)
+    return HostModel(name, halo, bulge, gas_HI, gas_H2, stars, age, rt, nothing, nothing, nothing, nothing, nothing)
 end
 
 function Base.getproperty(obj::HostModel, s::Symbol)
@@ -60,7 +60,6 @@ function Base.getproperty(obj::HostModel, s::Symbol)
     end
 
     return getfield(obj, s)
-
 end
 
 ρ_HI(r::Real, z::Real, host::HostModel) = ρ_gas(r, z, host.gas_HI)
@@ -69,6 +68,14 @@ end
 ρ_bulge(r::Real, z::Real, host::HostModel) = ρ_bulge(r, z, host.bulge)
 ρ_stars(r::Real, z::Real, host::HostModel) = ρ_stars(r, z, host.stars)
 ρ_baryons(r::Real, z::Real, host::HostModel) = ρ_ISM(r, z, host) + ρ_bulge(r, z, host) + ρ_stars(r, z, host) 
+
+# Surface density (for disc galaxies)
+σ_HI(r::Real, host::HostModel) = σ_gas(r, host.gas_HI)
+σ_H2(r::Real, host::HostModel) = σ_gas(r, host.gas_H2)
+σ_ISM(r::Real, host::HostModel) = σ_HI(r, host) + σ_H2(r, host)
+σ_bulge(r::Real, host::HostModel) = σ_bulge(r, host.bulge)
+σ_stars(r::Real, host::HostModel) = σ_stars(r, host.stars)
+σ_baryons(r::Real, host::HostModel) = σ_ISM(r, host) + σ_bulge(r, host) + σ_stars(r, host) 
 
 
 """ age of the host in s at any redshift """
@@ -91,15 +98,15 @@ end
 ρ_baryons_spherical(r::Real, host::HostModel) = QuadGK.quadgk(xp -> der_ρ_baryons_spherical(xp, r, host), 0, 1, rtol=1e-4)[1] 
 m_baryons_spherical(r::Real, host::HostModel) = 4.0 * π * QuadGK.quadgk(rp -> rp^2 * ρ_baryons_spherical(rp, host), 0, r, rtol=1e-3)[1] 
 
-ρ_host_spherical(r::Real, host::HostModel) = ρ_baryons_spherical(r, host) + ρ_halo(r, host.halo) : ρ_halo(r, host.halo)
-m_host_spherical(r::Real, host::HostModel) = m_baryons_spherical(r, host) + m_halo(r, host.halo) : m_halo(r, host.halo)
+ρ_host_spherical(r::Real, host::HostModel) = ρ_baryons_spherical(r, host) + ρ_halo(r, host.halo)
+m_host_spherical(r::Real, host::HostModel) = m_baryons_spherical(r, host) + m_halo(r, host.halo)
 
 
 """ circular velocity in (Mpc / s) for `r` in Mpc """
 circular_velocity(r::Real, host::HostModel = milky_way_MM17_g1) = sqrt(G_NEWTON * m_host_spherical(r, host) / r) 
 
 """ circular velocity in (km / s) for `r` in Mpc """
-circular_velcoity_kms(r::Real, host::HostModel = milky_way_MM17_g1) = circular_velocity(r, host) *  MPC_TO_KM
+circular_velocity_kms(r::Real, host::HostModel = milky_way_MM17_g1) = circular_velocity(r, host) *  MPC_TO_KM
 
 """ circular period in s for `r` in Mpc """
 circular_period(r::Real, host::HostModel = milky_way_MM17_g1) = 2.0 * π * r / circular_velocity(r, host)  
@@ -108,7 +115,7 @@ circular_period(r::Real, host::HostModel = milky_way_MM17_g1) = 2.0 * π * r / c
 number_circular_orbits(r::Real, host::HostModel = milky_way_MM17_g1, z::Real = 0, cosmo::BkgCosmology = planck18_bkg; kws...) = floor(Int, age_host(z, host, cosmo, kws...) / circular_period(r, host))
 
 """ Jeans dispersion in (Mpc / s)"""
-velocity_dispersion_spherical(r::Real, host::HostModel = milky_way_MM17_g1) = sqrt(G_NEWTON / ρ_halo(r, host.halo) * QuadGK.quadgk(rp -> ρ_halo(rp, host.halo) * m_host_spherical(rp, host)/rp^2, r, host.rt, rtol=1e-3)[1])
+velocity_dispersion_spherical(r::Real, host::HostModel = milky_way_MM17_g1) = (r >= host.rt) ? 0.0 : sqrt(G_NEWTON / ρ_halo(r, host.halo) * QuadGK.quadgk(rp -> ρ_halo(rp, host.halo) * m_host_spherical(rp, host)/rp^2, r, host.rt, rtol=1e-3)[1])
 
 """ Jeans dispersion in (km / s)"""
 velocity_dispersion_spherical_kms(r::Real, host::HostModel = milky_way_MM17_g1) = velocity_dispersion_spherical(r, host) * MPC_TO_KM
@@ -128,6 +135,7 @@ end
 ρ_exponential_disc(r::Real, z::Real; σ0::Real, rd::Real, zd::Real) = σ0/(2.0*zd)*exp(-abs(z)/zd - r/rd)
 σ_exponential_disc(r::Real; σ0::Real, rd::Real) = σ0 * exp(-r/rd)
 ρ_sech_disc(r::Real, z::Real; σ0::Real, rd::Real, rm::Real, zd::Real) = σ0/(4.0*zd)*exp(-rm/r - r/rd)*(sech(z/(2.0*zd)))^2
+σ_sech_disc(r::Real; σ0::Real, rd::Real, rm::Real, zd::Real)= σ0 * exp(-r/rd - rm/r)
 
 struct AxiSymmetricBGBulgeModel{T<:Real} <: BulgeModel{T}
     ρ0b::T
@@ -138,6 +146,7 @@ struct AxiSymmetricBGBulgeModel{T<:Real} <: BulgeModel{T}
 end
 
 ρ_bulge(r::Real, z::Real, bulge::AxiSymmetricBGBulgeModel) = ρ_spherical_BG02(r, z, ρ0b = bulge.ρ0b, r0 = bulge.r0, q = bulge.q, α = bulge.α, rcut = bulge.rcut)
+σ_bulge(r::Real, bulge::AxiSymmetricBGBulgeModel) = QuadGK.quadgk( z-> ρ_bulge(r, z, bulge), -10*bulge.q/r, 10*bulge.q/r, rtol=1e-3)[1]
 
 struct SechGasModel{T<:Real} <: GasModel{T}
     σ0::T
@@ -147,6 +156,7 @@ struct SechGasModel{T<:Real} <: GasModel{T}
 end
 
 ρ_gas(r::Real, z::Real, gas::SechGasModel) = ρ_sech_disc(r, z, σ0 = gas.σ0, rd = gas.rd, rm = gas.rm, zd = gas.zd)
+σ_gas(r::Real, gas::SechGasModel) = σ_sech_disc(r, σ0 = gas.σ0, rd = gas.rd, rm = gas.rm, zd = gas.zd)
 
 struct DoubleDiscStellarModel{T<:Real} <: StellarModel{T}
     thin_σ0::T
@@ -203,8 +213,9 @@ function _load(host::HostModel, s::Symbol)
     y = data["y"]
 
     log10_y = Interpolations.interpolate((log10.(r),), log10.(y),  Interpolations.Gridded(Interpolations.Linear()))
-    return @eval $s(x::Real) = 10.0^$(Ref(log10_y))[](log10(x))
+    #return @eval $s(x::Real) = 10.0^$(Ref(log10_y))[](log10(x))
 
+    return x-> 10.0^log10_y(log10(x))
 end
 
 
