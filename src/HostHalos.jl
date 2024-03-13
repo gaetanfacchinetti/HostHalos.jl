@@ -257,7 +257,13 @@ function _save(host::HostModel, s::Symbol)
     r = 10.0.^range(log10(1e-3 * host.halo.rs), log10(host.rt), 100)
 
     @info "| Saving " * string(s) * " in cache" 
-    y = @eval $s.($(Ref(r))[], $(Ref(host))[])
+
+    y = Array{Float64}(undef, 100)
+    Threads.@threads for ir in 1:100
+        y[ir] = @eval $s($(Ref(r))[][$(Ref(ir))[]], $(Ref(host))[])
+    end
+    
+    #y = @eval $s.($(Ref(r))[], $(Ref(host))[])
     
     JLD2.jldsave(cache_location * string(s)  * "_" * string(hash(host.name), base=16) * ".jld2" ; r = r, y = y)
 
