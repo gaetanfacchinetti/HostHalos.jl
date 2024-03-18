@@ -12,7 +12,7 @@ export circular_velocity, circular_period, number_circular_orbits, velocity_disp
 export circular_velocity_kms, velocity_dispersion_spherical_kms 
 export milky_way_MM17_g1, milky_way_MM17_g0
 export maximum_impact_parameter, number_stellar_encounters, stellar_mass_function, stellar_mass_model_C03, moments_stellar_mass
-export preload!
+export load!
 
 abstract type BulgeModel{T<:Real} end
 abstract type GasModel{T<:Real} end
@@ -65,6 +65,11 @@ function Base.getproperty(obj::HostModel, s::Symbol)
 
     return getfield(obj, s)
 end
+
+
+# overrinding print function
+Base.show(io::IO, host::HostModel) = print(io, "host name : " * host.name)
+
 
 ρ_HI(r::Real, z::Real, host::HostModel) = ρ_gas(r, z, host.gas_HI)
 ρ_H2(r::Real, z::Real, host::HostModel) = ρ_gas(r, z, host.gas_H2)
@@ -303,7 +308,7 @@ function _load(host::HostModel, s::Symbol)
 end
 
 # preload a number of functions
-function preload!(host::HostModel)
+function load!(host::HostModel)
     for field in fieldnames(HostModel)
         (getfield(host, field) === nothing) && setfield!(host, field, _load(host, field))
     end
