@@ -14,6 +14,7 @@ export milky_way_MM17_g1, milky_way_MM17_g0
 export maximum_impact_parameter, number_stellar_encounters, stellar_mass_function, stellar_mass_model_C03, moments_stellar_mass
 export load!
 
+
 abstract type BulgeModel{T<:Real} end
 abstract type GasModel{T<:Real} end
 abstract type StellarModel{T<:Real} end
