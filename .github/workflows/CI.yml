@@ -37,7 +37,7 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - name: Add local registry
-        run: julia -e 'using Pkg; Pkg.Registry.add(RegistrySpec(url="https://github.com/gaetanfacchinetti/CosmoRegistry"))'
+        run: julia -e 'using Pkg; Pkg.Registry.add(RegistrySpec(url="https://github.com/gaetanfacchinetti/CosmoRegistry.git"))'
       - name: Install dependencies
         run: julia -e 'using Pkg; Pkg.instantiate()'
       - uses: julia-actions/cache@v2
