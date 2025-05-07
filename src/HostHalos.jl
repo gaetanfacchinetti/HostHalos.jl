@@ -191,7 +191,7 @@ end
 
 """ number of stars encountered on one disk crossing """
 function number_stellar_encounters(r::Real, host::HostModel{<:Real}, θ::Real = π/3.0)
-    return floor(Int, σ_stars(r, host) / host.stars.mass_model.average_mstar * 2 * π / cos(θ) * maximum_impact_parameter(r, host)^2)
+    return floor(Int, σ_stars(r, host) / host.stars.mass_model.average_mstar * π / cos(θ) * maximum_impact_parameter(r, host)^2)
 end
 
 
