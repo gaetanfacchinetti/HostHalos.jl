@@ -12,17 +12,19 @@ export circular_velocity, circular_period, number_circular_orbits, velocity_disp
 export circular_velocity_kms, velocity_dispersion_spherical_kms 
 export milky_way_MM17_g1, milky_way_MM17_g0
 export maximum_impact_parameter, number_stellar_encounters, stellar_mass_function, stellar_mass_model_C03, moments_stellar_mass
-export load!
+export load!, make_cache
+export get_host_halo_type
 
 
-abstract type BulgeModel{T<:Real} end
-abstract type GasModel{T<:Real} end
-abstract type StellarModel{T<:Real} end
+abstract type BulgeModel{T<:AbstractFloat} end
+abstract type GasModel{T<:AbstractFloat} end
+abstract type StellarModel{T<:AbstractFloat} end
 
-mutable struct HostModel{T<:Real}
+
+mutable struct HostModel{T<:AbstractFloat, S<:Real}
 
     const name::String
-    const halo::Halo{T}
+    const halo::Halo{T, S}
     const bulge::BulgeModel{T}
     const gas_HI::GasModel{T}
     const gas_H2::GasModel{T}
@@ -46,15 +48,22 @@ Base.length(::HostModel) = 1
 Base.iterate(iter::HostModel) = (iter, nothing)
 Base.iterate(::HostModel, state::Nothing) = nothing
 
-function HostModel(name::String, halo::Halo{<:Real}, bulge::BulgeModel{<:Real}, 
-    gas_HI::GasModel{<:Real}, gas_H2::GasModel{<:Real}, 
-    stars::StellarModel{<:Real}, age::Real,
-    rt::Real = -1)
+get_host_halo_type(::HostModel{T, S}) where {T<:AbstractFloat, S<:Real} = T, S
+
+function HostModel(name::String, 
+    halo::Halo{T, S}, 
+    bulge::BulgeModel{T}, 
+    gas_HI::GasModel{T}, 
+    gas_H2::GasModel{T}, 
+    stars::StellarModel{T}, 
+    age::Real,
+    rt::Real = -1) where {T<:AbstractFloat, S<:Real}
 
     # by default the tidal radius is set to the virial radius
     (rt == -1) && (rt = rΔ(halo))
 
-    return HostModel(name, halo, bulge, gas_HI, gas_H2, stars, age, rt, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+    return HostModel(name, halo, bulge, gas_HI, gas_H2, stars, age, rt,
+                nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 function Base.getproperty(obj::HostModel, s::Symbol)
@@ -66,6 +75,7 @@ function Base.getproperty(obj::HostModel, s::Symbol)
 
     return getfield(obj, s)
 end
+
 
 
 # overrinding print function
@@ -111,28 +121,26 @@ m_baryons_spherical(r::Real, host::HostModel) = 4.0 * π * QuadGK.quadgk(rp -> r
 ρ_host_spherical(r::Real, host::HostModel) = ρ_baryons_spherical(r, host) + ρ_halo(r, host.halo)
 m_host_spherical(r::Real, host::HostModel) = m_baryons_spherical(r, host) + m_halo(r, host.halo)
 
-""" total mass of the host """
-m_host(host::HostModel) = host.m_host_spherical === nothing ? m_host_spherical(host.rt, host) : host.m_host_spherical(host.rt)
-
-mΔ(h::Halo{<:Real}, Δ::Real = 200, cosmo::Cosmology = planck18) = mΔ(h, Δ, cosmo.bkg.ρ_c0)
+mΔ(h::Halo{<:AbstractFloat, <:Real}, Δ::Real = 200, cosmo::Cosmology = planck18) = mΔ(h, Δ, cosmo.bkg.ρ_c0)
 
 """ circular velocity in (Mpc / s) for `r` in Mpc """
-circular_velocity(r::Real, host::HostModel = milky_way_MM17_g1) = sqrt(G_NEWTON * m_host_spherical(r, host) / r) 
+circular_velocity(r::Real, host::HostModel = milky_way_MM17_g1; use_tables::Bool = false) = sqrt(G_NEWTON * (use_tables ? host.m_host_spherical(r) : m_host_spherical(r, host)) / r) 
 
 """ circular velocity in (km / s) for `r` in Mpc """
-circular_velocity_kms(r::Real, host::HostModel = milky_way_MM17_g1) = circular_velocity(r, host) *  MPC_TO_KM
+circular_velocity_kms(r::Real, host::HostModel = milky_way_MM17_g1; use_tables::Bool = false) = circular_velocity(r, host, use_tables = use_tables) *  MPC_TO_KM
 
 """ circular period in s for `r` in Mpc """
-circular_period(r::Real, host::HostModel = milky_way_MM17_g1) = 2.0 * π * r / circular_velocity(r, host)  
+circular_period(r::Real, host::HostModel = milky_way_MM17_g1; use_tables::Bool = false) = 2.0 * π * r / circular_velocity(r, host, use_tables = use_tables)  
 
 """ number or circular orbits with `r` in Mpc """
-number_circular_orbits(r::Real, host::HostModel = milky_way_MM17_g1, z::Real = 0, bkg_cosmo::BkgCosmology = planck18_bkg; kws...) = floor(Int, age_host(z, host, bkg_cosmo, kws...) / circular_period(r, host))
+number_circular_orbits(r::Real, host::HostModel = milky_way_MM17_g1, z::Real = 0, bkg_cosmo::BkgCosmology = planck18_bkg; use_tables::Bool = false, kws...) = floor(Int, age_host(z, host, bkg_cosmo, kws...) / circular_period(r, host, use_tables = use_tables))
 
-""" Jeans dispersion in (Mpc / s)"""
+""" Jeans dispersion in (Mpc / s) """
 velocity_dispersion_spherical(r::Real, host::HostModel = milky_way_MM17_g1) = (r >= host.rt) ? 0.0 : sqrt(G_NEWTON / ρ_halo(r, host.halo) * QuadGK.quadgk(rp -> ρ_halo(rp, host.halo) * m_host_spherical(rp, host)/rp^2, r, host.rt, rtol=1e-3)[1])
 
-""" Jeans dispersion in (km / s)"""
+""" Jeans dispersion in (km / s) """
 velocity_dispersion_spherical_kms(r::Real, host::HostModel = milky_way_MM17_g1) = velocity_dispersion_spherical(r, host) * MPC_TO_KM
+
 
 
 
@@ -258,7 +266,17 @@ milky_way_MM17_g0 = HostModel("MilkyWay_MM17_g0", Halo(coreProfile, 9.0860597440
 
 cache_location::String = ".cache/"
 
+# save the different functions in the folder
 function _save(host::HostModel, s::Symbol)
+
+    hash_value = hash(host.name)
+
+    !(isdir(cache_location)) && mkdir(cache_location)
+    filenames  = readdir(cache_location)
+    file       = string(s) * "_" * string(hash_value, base=16) * ".jld2" 
+
+    # if the file already exists we do not recompute it again
+    (file in filenames) && return true
     
     r = 10.0.^range(log10(1e-3 * host.halo.rs), log10(host.rt), 100)
 
@@ -281,15 +299,12 @@ end
 ## Possibility to interpolate the model
 function _load(host::HostModel, s::Symbol)
 
+    _save(host, s)
+
     hash_value = hash(host.name)
-
-    !(isdir(cache_location)) && mkdir(cache_location)
-    filenames  = readdir(cache_location)
     file       = string(s) * "_" * string(hash_value, base=16) * ".jld2" 
-
-    !(file in filenames) && _save(host, s)
-
     data    = JLD2.jldopen(cache_location * file)
+
     r = data["r"]
     y = data["y"]
 
@@ -302,7 +317,9 @@ function _load(host::HostModel, s::Symbol)
             return @eval $s($(Ref(x))[], $(Ref(host))[])
         end
 
-        return 10.0^log10_y(log10(x))
+        res = 10.0^log10_y(log10(x))
+
+        return (s === :number_stellar_encounters) ? floor(Int,  res) : res
     end
 
     return return_func
@@ -313,6 +330,16 @@ function load!(host::HostModel)
     for field in fieldnames(HostModel)
         (getfield(host, field) === nothing) && setfield!(host, field, _load(host, field))
     end
+end
+
+
+# precompute the cache
+function make_cache(host::HostModel)
+
+    ft = [_ft for _ft in (fieldtype.(HostModel, fieldnames(HostModel)))]
+    _save.(host,  [_f for _f in fieldnames(HostModel)[findall(==(true), (ft .=== Union{Nothing, Function}))]])
+
+    return nothing
 end
 
 
