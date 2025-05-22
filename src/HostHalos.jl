@@ -193,12 +193,12 @@ moments_stellar_mass(n::Int, model::LNPLStellarMassModel{<:Real}= stellar_mass_m
 
 
 """ maximum impact parameters at distance r (Mpc) from the Galactic center"""
-function maximum_impact_parameter(r::Real, host::HostModel{<:Real})
+function maximum_impact_parameter(r::T, host::HostModel{T, <:Real}) where {T<:AbstractFloat}
     return host.stars.mass_model.average_mstar^(1/3)/σ_stars(r, host) * QuadGK.quadgk(lnz -> exp(lnz) * ρ_stars(r, exp(lnz), host)^(2/3), log(1e-10), log(1e+0), rtol=1e-10)[1] 
 end
 
 """ number of stars encountered on one disk crossing """
-function number_stellar_encounters(r::Real, host::HostModel{<:Real}, θ::Real = π/3.0)
+function number_stellar_encounters(r::T, host::HostModel{T, <:Real}, θ::T = T(π/3.0)) where {T<:AbstractFloat}
     return floor(Int, σ_stars(r, host) / host.stars.mass_model.average_mstar * π / cos(θ) * maximum_impact_parameter(r, host)^2)
 end
 
@@ -278,12 +278,12 @@ function _save(host::HostModel, s::Symbol)
     # if the file already exists we do not recompute it again
     (file in filenames) && return true
     
-    r = 10.0.^range(log10(1e-3 * host.halo.rs), log10(host.rt), 100)
+    r = 10.0.^range(log10(1e-3 * host.halo.rs), log10(host.rt), 500)
 
     @info "| Saving " * string(s) * " in cache" 
 
-    y = Array{Float64}(undef, 100)
-    Threads.@threads for ir in 1:100
+    y = Array{Float64}(undef, 500)
+    Threads.@threads for ir in 1:500
         y[ir] = @eval $s($(Ref(r))[][$(Ref(ir))[]], $(Ref(host))[])
     end
     
@@ -317,7 +317,7 @@ function _load(host::HostModel, s::Symbol)
             return @eval $s($(Ref(x))[], $(Ref(host))[])
         end
 
-        res = 10.0^log10_y(log10(x))
+        res = exp10(log10_y(log10(x)))
 
         return (s === :number_stellar_encounters) ? floor(Int,  res) : res
     end
