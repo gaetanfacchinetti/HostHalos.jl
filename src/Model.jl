@@ -20,7 +20,7 @@ struct HostModel{
     gas_H2::GMH2
     stars::SM
 
-    age::T # in s
+    age::T # in Gyrs
     rt::T # in Mpc
 
 end
@@ -106,10 +106,11 @@ Base.show(io::IO, host::HostModel) = print(io, "host name : " * host.name)
 
 
 
-""" age of the host in s at any redshift """
+""" age of the host in Gyrs at any redshift """
 function age_host(z::T, host::HostModelType{T}, cosmo::BkgCosmology{T} = dflt_bkg_cosmo(T); kws...) where {T<:AbstractFloat}
     z_max = lookback_redshift(host.age)
-    return δt_s(z_to_a(z_max), z_to_a(z), cosmo; kws...)
+    @assert z_max > z "z must be below the formation redshift of the galaxy, z_max = $z_max"
+    return δt(z_to_a(z_max), z_to_a(z), cosmo; kws...)
 end
 
 
@@ -136,16 +137,16 @@ end
 ρ_host_spherical(r::T, host::HostModelType{T}) where {T<:AbstractFloat} = ρ_baryons_spherical(r, host) + ρ_halo(r, host.halo)
 m_host_spherical(r::T, host::HostModelType{T}) where {T<:AbstractFloat} = m_baryons_spherical(r, host) + m_halo(r, host.halo)
 
-mΔ(h::Halo{T, S}, Δ::T = T(200), cosmo::C = planck18) where {T<:AbstractFloat, S<:Real, C<:Cosmology{T, <:BkgCosmology{T}}}  = mΔ(h, Δ, cosmo.bkg.ρ_c0)
+mΔ(h::HaloType{T}, Δ::T = T(200), cosmo::C = dflt_cosmo(T)) where {T<:AbstractFloat, C<:Cosmology{T, <:BkgCosmology{T}}}  = mΔ(h, Δ, cosmo.bkg.ρ_c0)
 
-""" circular velocity in (Mpc / s) for `r` in Mpc """
-circular_velocity(r::T, host::HostModelType{T} = milky_way_MM17_g1) where {T<:AbstractFloat} = sqrt(constant_G_NEWTON(MegaParsecs, Msun, Seconds, T) * m_host_spherical(r, host)/ r) 
+""" circular velocity in (Mpc / Gyrs) for `r` in Mpc """
+circular_velocity(r::T, host::HostModelType{T} = milky_way_MM17_g1) where {T<:AbstractFloat} = sqrt(constant_G_NEWTON(MegaParsecs, Msun, GigaYears, T) * m_host_spherical(r, host)/ r) 
 
 """ circular velocity in (km / s) for `r` in Mpc """
 circular_velocity_kms(r::T, host::HostModelType{T} = milky_way_MM17_g1) where {T<:AbstractFloat}  = sqrt(constant_G_NEWTON(KiloMeters, Msun, Seconds, T) * m_host_spherical(r, host) / convert_lengths(r, MegaParsecs, KiloMeters)) 
  
-""" circular period in s for `r` in Mpc """
-circular_period(r::T, host::HostModelType{T} = milky_way_MM17_g1)  where {T<:AbstractFloat} = 2.0 * π * r / circular_velocity(r, host)  
+""" circular period in Gyrs for `r` in Mpc """
+circular_period(r::T, host::HostModelType{T} = milky_way_MM17_g1)  where {T<:AbstractFloat} = T(2) * π * r / circular_velocity(r, host)  
 
 """ number or circular orbits with `r` in Mpc """
 number_circular_orbits(r::T, host::HostModelType{T} = milky_way_MM17_g1, z::T = T(0), bkg_cosmo::BKG = dflt_bkg_cosmo(T); kws...)  where {T<:AbstractFloat, BKG<:BkgCosmology{T}}  = floor(Int, age_host(z, host, bkg_cosmo, kws...) / circular_period(r, host))
@@ -199,13 +200,70 @@ velocity_dispersion_spherical_kms(r::T, host::HostModelType{T} = milky_way_MM17_
 # Stellar mass and relative velocity distributions
 function stellar_mass_function_LNPL(m::T, m_cut::NTuple{4, T}, norm::NTuple{4, T}, indices::NTuple{3, T}, med::T, σm::T) where {T<:AbstractFloat}
     
-    (log10(m) <= m_cut[1]) && (return norm[1] * exp(-(log10(m) - log10(med))^2 / (T(2) * (σm)^2)) / m) 
-    (m_cut[1] < log10(m) && log10(m) <= m_cut[2]) && (return norm[2] *  m^indices[1])
-    (m_cut[2] < log10(m) && log10(m) <= m_cut[3]) && (return norm[3] *  m^indices[2])
-    (m_cut[3] < log10(m) && log10(m) <= m_cut[4]) && (return norm[4] *  m^indices[3])
+    log10_m = log10(m)
+
+    (log10_m <= m_cut[1]) && (return norm[1] * exp(-(log10_m - log10(med))^2 / (T(2) * (σm)^2)) / m) 
+    (m_cut[1] < log10_m && log10_m <= m_cut[2]) && (return norm[2] *  m^indices[1])
+    (m_cut[2] < log10_m && log10_m <= m_cut[3]) && (return norm[3] *  m^indices[2])
+    (m_cut[3] < log10_m && log10_m <= m_cut[4]) && (return norm[4] *  m^indices[3])
 
     return T(0)
 end
+
+
+cdf_LNPL(m0::T, m1::T, index::T) where {T<:AbstractFloat} = index != -1 ? (m1^(1+index) - m0^(1+index))/(1+index) : log(m1/m0) 
+
+function stellar_cdf_LNPL(m::T, m_cut::NTuple{4, T}, norm::NTuple{4, T}, indices::NTuple{3, T}, med::T, σm::T) where {T<:AbstractFloat}
+
+    log10_m = log10(m)
+
+    res =  norm[1] * sqrt(π/2) * σm * (1 + SpecialFunctions.erf((min(log10_m, m_cut[1]) - log10(med))/(sqrt(2) * σm)) ) * log(10)
+
+    log10_m > m_cut[1] && (res += norm[2] * cdf_LNPL( exp10(m_cut[1]), min(exp10(m_cut[2]), m), indices[1]))
+    log10_m > m_cut[2] && (res += norm[3] * cdf_LNPL( exp10(m_cut[2]), min(exp10(m_cut[3]), m), indices[2]))
+    log10_m > m_cut[3] && (res += norm[4] * cdf_LNPL( exp10(m_cut[3]), min(exp10(m_cut[4]), m), indices[3]))
+
+    return res
+
+end
+
+
+inv_cdf_LNPL(y::T, m0::T, norm::T, index::T, weight::T) where {T<:AbstractFloat} = index != -1 ?  ( (1+index) / norm * (y-weight)  + m0^(1+index) )^(1/(1+index)) : m0 * exp(y-weight)
+
+
+function stellar_inv_cdf_LNPL(y::T, m_cut::NTuple{4, T}, norm::NTuple{4, T}, indices::NTuple{3, T}, weights::NTuple{4, T}, med::T, σm::T) where {T<:AbstractFloat}
+    
+    if y <= weights[1]
+       return med * exp10( sqrt(2) * σm * SpecialFunctions.erfinv(sqrt(2/π) * y / norm[1] / σm / log(10) -1))
+    end
+
+    for i in 1:3
+        (y > weights[i] && y <= weights[i+1]) && (return inv_cdf_LNPL(y, exp10(m_cut[i]), norm[i+1], indices[i], weights[i]))
+    end
+
+    throw(ArgumentError("Impossible to evaluate inv_cdf_LNPL for y = $y"))
+
+end
+
+
+
+function stellar_inv_cdf_LNPL(y::Vector{T}, m_cut::NTuple{4, T}, norm::NTuple{4, T}, indices::NTuple{3, T}, weights::NTuple{4, T}, med::T, σm::T) where {T<:AbstractFloat}
+    
+    res = Vector{T}(undef, length(y)) 
+
+    mask = y .<= weights[1]
+    res[mask] = med * exp10.( sqrt(2) * σm * SpecialFunctions.erfinv.(sqrt(2/π) * y[mask] / norm[1] / σm / log(10) .- 1))
+
+    for i in 1:3
+        mask = (y .> weights[i] .&& y .<= weights[i+1])
+        res[mask] = inv_cdf_LNPL.(y[mask], exp10(m_cut[i]), norm[i+1], indices[i], weights[i])
+    end
+
+    return res
+
+end
+
+
 
 
 @inline function moments_stellar_mass_LNPL(n::Int, m_cut::NTuple{4, T}, norm::NTuple{4, T}, indices::NTuple{3, T}, med::T, σm::T) where {T<:AbstractFloat} 
@@ -223,8 +281,10 @@ struct LNPLStellarMassModel{T<:AbstractFloat} <: StellarMassModel{T}
     med::T
     σm::T
 
+    # computed quantity
     average_mstar::T   # in Msun
     average_mstar2::T  # in Msun^2
+    weights::NTuple{4, T}
 
 end
 
@@ -239,26 +299,55 @@ function convert_StellarMassModel(::Type{T}, model::LNPLStellarMassModel) where 
         Tuple(T.(model.m_cut)), 
         Tuple(T.(model.norm)),
         Tuple(T.(model.indices)),
-        convert.(T, getfield.(model, fieldnames(LNPLStellarMassModel)[4:end]))...)
+        convert.(T, getfield.(model, fieldnames(LNPLStellarMassModel)[4:end-1]))...,
+        Tuple(T.(model.weights)))
 end
 
 function LNPLStellarMassModel(m_cut::NTuple{4, T}, norm::NTuple{4, T}, indices::NTuple{3, T}, med::T, σm::T) where {T<:AbstractFloat}
     
     # here we precompte the first and second moment of the stellar mass function if they are not given in input
-    _av_mstar = moments_stellar_mass_LNPL(1, m_cut, norm, indices, med, σm) : av_mstar
-    _av_mstar2 = moments_stellar_mass_LNPL(2, m_cut, norm, indices, med, σm) : av_mstar2
+    _av_mstar = moments_stellar_mass_LNPL(1, m_cut, norm, indices, med, σm)
+    _av_mstar2 = moments_stellar_mass_LNPL(2, m_cut, norm, indices, med, σm)
+
+    _weights = [stellar_cdf_LNPL(exp10(m_c), m_cut, norm, indices, med, σm) for m_c in m_cut]
+    _weights[end] = T(1) # set the last weight to exactly 1
     
-    return LNPLStellarMassModel(m_cut, norm, indices, med, σm, _av_mstar, _av_mstar2)
+    return LNPLStellarMassModel(m_cut, norm, indices, med, σm, _av_mstar, _av_mstar2, Tuple(_weights))
 end
 
-const stellar_mass_model_C03::LNPLStellarMassModel{Float64} = LNPLStellarMassModel((0.0, 0.54, 1.26, 1.80), (0.2613, 0.0728, 0.02481, 0.0004135), (-5.37, -4.53, -3.11), 0.079, 0.69, 0.16794677064645963, 0.08941378784419536)
-
+const stellar_mass_model_C03::LNPLStellarMassModel{Float64} = LNPLStellarMassModel((0.0, 0.54, 1.26, 1.80), (0.2613, 0.0728, 0.02481, 0.0004135), (-5.37, -4.53, -3.11), 0.079, 0.69)#, 0.16794677064645963, 0.08941378784419536)
 
 stellar_mass_function(m::T, model::SM = stellar_mass_model_C03) where {T<:AbstractFloat, SM<:LNPLStellarMassModel{T}}= stellar_mass_function_LNPL(m, model.m_cut, model.norm, model.indices, model.med, model.σm)
+stellar_cdf(m::T, model::SM = stellar_mass_model_C03) where {T<:AbstractFloat, SM<:LNPLStellarMassModel{T}} = stellar_cdf_LNPL(m, model.m_cut, model.norm, model.indices, model.med, model.σm)
+stellar_inv_cdf(y::T, model::SM = stellar_mass_model_C03) where {T<:AbstractFloat, SM<:LNPLStellarMassModel{T}} = stellar_inv_cdf_LNPL(y, model.m_cut, model.norm, model.indices, model.weights, model.med, model.σm)
+stellar_inv_cdf(y::Vector{T}, model::SM = stellar_mass_model_C03) where {T<:AbstractFloat, SM<:LNPLStellarMassModel{T}} = stellar_inv_cdf_LNPL(y, model.m_cut, model.norm, model.indices, model.weights, model.med, model.σm)
 moments_stellar_mass(n::Int, model::LNPLStellarMassModel{<:AbstractFloat}= stellar_mass_model_C03) =  moments_stellar_mass_LNPL(n, model.m_cut, model.norm, model.indices, model.med, model.σm)
 
 stellar_mass_function(m::T, host::HostModelType{T}) where {T<:AbstractFloat} = stellar_mass_function(m, host.stars.mass_model)
+stellar_cdf(m::T, host::HostModelType{T}) where {T<:AbstractFloat} = stellar_cdf(m, host.stars.mass_model)
+stellar_inv_cdf(y::T, host::HostModelType{T}) where {T<:AbstractFloat} = stellar_inv_cdf(y, host.stars.mass_model)
+stellar_inv_cdf(y::Vector{T}, host::HostModelType{T}) where {T<:AbstractFloat} = stellar_inv_cdf(y, host.stars.mass_model)
 moments_stellar_mass(n::Int, host::HostModelType{T})  where {T<:AbstractFloat} = moments_stellar_mass(n, host.stars.mass_model)
+
+
+xval(x::T, log10_med::T, σm::T) where {T<:AbstractFloat} = exp10(muladd(σm, x, log10_med))
+function rand_stellar_mass_LNPL(n::Int, model::LNPLStellarMassModel{T}, rng::Random.AbstractRNG = Random.default_rng()) where {T<:AbstractFloat} 
+    
+    # allocate a vector for the output
+    # exact lognormal distribution
+    res = xval.(randn(rng, T, n), log10(model.med), model.σm)
+
+    # mask and draw at the smaller values, which can be drawn from a gaussian (faster)
+    mask = (res .> model.m_cut[1])
+
+    # draw the higher values according to the inverse of the cdf
+    res[mask] = stellar_inv_cdf_LNPL(rand(rng, T, count(mask)), model.m_cut, model.norm, model.indices, model.weights, model.med, model.σm)
+    
+    return res
+
+end
+
+
 
 
 """ maximum impact parameters at distance r (Mpc) from the Galactic center"""
@@ -349,6 +438,6 @@ const bulge_MM17::AxiSymmetricBGBulgeModel = AxiSymmetricBGBulgeModel(9.73e+19, 
 const gas_HI_MM17::SechGasModel = SechGasModel(5.31e+13, 8.5e-5, 4.0e-3, 7.0e-3)
 const gas_H2_MM17::SechGasModel = SechGasModel(2.180e+15, 4.5e-5, 1.2e-2, 1.5e-3) 
 
-milky_way_MM17_g1 = HostModel("MilkyWay_MM17_g1", Halo(nfwProfile, 9.24412866426226e+15, 1.86e-2),  bulge_MM17, gas_HI_MM17, gas_H2_MM17, DoubleDiscStellarModel(stellar_mass_model_C03, 8.87e+14, 3.0e-4, 2.53e-3, 1.487e+14, 9.0e-4, 3.29e-3), 1e+4 * MYR_TO_S)
-milky_way_MM17_g0 = HostModel("MilkyWay_MM17_g0", Halo(coreProfile, 9.086059744049174e+16, 7.7e-3), bulge_MM17, gas_HI_MM17, gas_H2_MM17, DoubleDiscStellarModel(stellar_mass_model_C03, 8.87e+14, 3.0e-4, 2.36e-3, 1.487e+14, 9.0e-4, 3.29e-3), 1e+4 * MYR_TO_S)
+milky_way_MM17_g1 = HostModel("MilkyWay_MM17_g1", Halo(nfwProfile, 9.24412866426226e+15, 1.86e-2),  bulge_MM17, gas_HI_MM17, gas_H2_MM17, DoubleDiscStellarModel(stellar_mass_model_C03, 8.87e+14, 3.0e-4, 2.53e-3, 1.487e+14, 9.0e-4, 3.29e-3), 10.0)
+milky_way_MM17_g0 = HostModel("MilkyWay_MM17_g0", Halo(coreProfile, 9.086059744049174e+16, 7.7e-3), bulge_MM17, gas_HI_MM17, gas_H2_MM17, DoubleDiscStellarModel(stellar_mass_model_C03, 8.87e+14, 3.0e-4, 2.36e-3, 1.487e+14, 9.0e-4, 3.29e-3), 10.0)
 

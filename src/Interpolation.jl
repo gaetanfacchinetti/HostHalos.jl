@@ -31,6 +31,12 @@ const HostInterpolationType{T} = HostInterpolation{
 }
 
 
+Base.length(::HostInterpolation) = 1
+Base.iterate(iter::HostInterpolation) = (iter, nothing)
+Base.iterate(::HostInterpolation, state::Nothing) = nothing
+
+get_host_halo_type(::HostInterpolationType{T}) where {T<:AbstractFloat} = T
+
 function get_hash(host::HostModel{T, P, BM, GMHI, GMH2, SM}) where {T<:AbstractFloat, P<:HaloProfile, BM<:BulgeModel{T}, GMHI<:GasModel{T},  GMH2<:GasModel{T},  SM<:StellarModel{T, <:StellarMassModel{T}}} 
     
     if T === Float64
@@ -136,4 +142,19 @@ function number_stellar_encounters(r::T, wrapper::HostInterpolationType{T}) wher
     end
 
     return number_stellar_encounters(r, wrapper.host)
+end
+
+moments_stellar_mass(n::Int, wrapper::HostInterpolationType) = moments_stellar_mass(n, wrapper.host)
+stellar_mass_function(m::T, wrapper::HostInterpolationType{T}) where {T<:AbstractFloat} = stellar_mass_function(m, wrapper.host)
+number_circular_orbits(r::T, wrapper::HostInterpolationType{T}, z::T = T(0), bkg_cosmo::BkgCosmology{T} = dflt_bkg_cosmo(T); kws...)  where {T<:AbstractFloat}  = number_circular_orbits(r, wrapper.host, z, bkg_cosmo; kws...)
+age_host(z::T, wrapper::HostInterpolationType{T}, cosmo::BkgCosmology{T} = dflt_bkg_cosmo(T); kws...) where {T<:AbstractFloat} = age_host(z, wrapper.host, cosmo; kws...)
+
+# overriding the getproperty method to automatically get the host field values
+function Base.getproperty(wrapper::HostInterpolationType, s::Symbol)
+    
+    if s ∈ [:interp_map, :log10_r_min, :log10_r_max, :host]
+        return getfield(wrapper, s)
+    end
+
+    return getfield(wrapper.host, s)
 end
